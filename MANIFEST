@@ -6,5 +6,6 @@ README
 lib/FrameNet/QueryData.pm
 t/00-load.t
 t/01-frames.t
+t/02-framerelations.t
 t/pod-coverage.t
 t/pod.t

@@ -2,7 +2,7 @@ package FrameNet::QueryData;
 
 require Exporter;
 our @ISA = qw(Exporter);
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use Carp;
 use warnings;
@@ -12,14 +12,8 @@ use XML::TreeBuilder;
 use XML::XPath;
 use File::Spec;
 use Data::Dumper;
-#use Class::MethodMaker 
-#  [ scalar => [ { '*_reset' => undef,
-#		  '*_clear' => undef }, qw / fnhome 
-#					     file_frames_xml
-#					     file_frrelation_xml
-#					     verbose 
-#					     cache / ],
-#  ];
+
+my $CACHE_VERSION = '0.03.2';
 
 sub new {
   my $class = shift;
@@ -54,6 +48,15 @@ sub new {
     $self->verbose(0);
   };
 
+  ###############
+  ### CACHE #####
+  ###############
+  if (defined $params{-cache}) {
+      $self->cache(1);
+  } else {
+      $self->cache(0);
+  }
+
   # Currently no cache system available
   # $self->cache(0);
   # $self->{VCACHE} = 0.01;
@@ -69,9 +72,41 @@ sub new {
 						 "frRelation.xml"));
   
   # no cache in this version
-  # $self->{cachefilename} = File::Spec->catfile((File::Spec->tmpdir),(defined $ENV{'USER'}?$ENV{'USER'}:"user")."-FrameNet-QueryData-".$self->{VCACHE}.".dat");
+
 
   return $self;
+}
+
+sub _init_cache {
+    my $self = shift;
+
+
+    # Used for untainting
+    my $u = $ENV{'USER'};
+    
+    if ($u =~ /^([\w\.\-]+)$/) {
+	$u = $1;
+    } else {
+	$u = 'user';
+    }
+
+    $self->{'cachefilename'} = File::Spec->catfile((File::Spec->tmpdir),$u."-FrameNet-QueryData-".$CACHE_VERSION.".dat");
+
+    if ($self->cache) {
+	if (! -e $self->{'cachefilename'}) {
+	    store({}, $self->{'cachefilename'});
+	}
+	$self->{'cache'} = retrieve($self->{'cachefilename'});
+    }
+
+    return $self->cache;
+}
+
+sub _store_cache {
+    my $self = shift;
+    if ($self->cache) {
+	store($self->{'cache'}, $self->{'cachefilename'});
+    }
 }
 
 sub fnhome {
@@ -86,21 +121,40 @@ sub verbose {
     return $self->{'verbose'};
 }
 
+sub cache {
+    my ($self, $cache) = @_;
+    $self->{'cache_enabled'} = $cache if (defined $cache);
+    return $self->{'cache_enabled'};
+}
+
 sub frame {
   my ($self, $framename) = @_;
   return {} if (not defined $framename);
+  if ($self->cache) {
+      $self->_init_cache;
+      if (exists($self->{'cache'}{'frames'}{$framename})) {
+	  return $self->{'cache'}{'frames'}{$framename};
+      }
+  }
   my $ret = {};
   $ret->{'name'} = $framename;
   $self->parse;
   $ret->{'lus'} = $self->_lu_part_of_frame($framename);
   $ret->{'fes'} = $self->_fe_part_of_frame($framename);
+
+  if ($self->cache) {
+      $self->_init_cache;
+      $self->{'cache'}{'frames'}{$framename} = $ret;
+      $self->_store_cache;
+  }
+
   return $ret;
 };
 
 sub related_frames {
   my ($self, $framename, $relation) = @_;
   $self->xparse;
-  return $self->{rels}->{$relation}->{$framename};  
+  return $self->{'rels'}->{$relation}->{$framename};  
 };
 
 sub related_inv_frames {
@@ -128,7 +182,12 @@ sub _lu_part_of_frame {
   my $partnodes = $self->_part_of_frame($framename, 'lexunit');
   my $ret = [];
   foreach my $pa (@$partnodes) {
-    push(@$ret, { 'name' => $pa->find('@name')->string_value,
+      my $name = $pa->find('@name')->string_value;
+      chop $name;
+      chop $name;
+
+
+    push(@$ret, { 'name' => $name,
 		  'ID' => $pa->find('@ID')->string_value,
 		  'pos' => $pa->find('@pos')->string_value,
 		  'status' => $pa->find('@status')->string_value,
@@ -222,21 +281,30 @@ sub dumpout {
 sub xparse {
   my $self = shift;
   if (! defined $self->{'xp'}) {
-    print STDERR "Parsing XML file (frRelation.xml)\n" if ($self->verbose > 0);
-    $self->{'xp'} = XML::XPath->new(filename => $self->file_frrelation_xml);
-    
-    foreach my $frame_relation ($self->{'xp'}->find("//frame-relation-type/frame-relations/frame-relation")->get_nodelist) {
-      
-      my $relation_type = $frame_relation->find('../../@name')->string_value;
-      
-      my $super = $frame_relation->find('@superFrameName')->string_value;
-      my $sub = $frame_relation->find('@subFrameName')->string_value;
-      
-      push(@{$self->{rels}->{$relation_type}->{$sub}},$super);
-      #      if (! grep(/$super/,@{$self->{rels}->{$relation_type}->{$sub}}));
-      push(@{$self->{rels}->{$relation_type}->{'inverse'}->{$super}},$sub);
-      #      if (! grep(/$super/,@{$self->{rels}->{$relation_type}->{'inverse'}->{$super}}));
-    };
+      if ($self->_init_cache and exists($self->{'cache'}{'rels'})) {
+	  $self->{'rels'} = $self->{'cache'}->{'rels'};
+      } else {
+
+	  print STDERR "Parsing XML file (frRelation.xml)\n" if ($self->verbose > 0);
+	  $self->{'xp'} = XML::XPath->new(filename => $self->file_frrelation_xml);
+	  
+	  foreach my $frame_relation ($self->{'xp'}->find("//frame-relation-type/frame-relations/frame-relation")->get_nodelist) {
+	      
+	      my $relation_type = $frame_relation->find('../../@name')->string_value;
+	      
+	      my $super = $frame_relation->find('@superFrameName')->string_value;
+	      my $sub = $frame_relation->find('@subFrameName')->string_value;
+	      
+	      push(@{$self->{rels}->{$relation_type}->{$sub}},$super);
+	      #      if (! grep(/$super/,@{$self->{rels}->{$relation_type}->{$sub}}));
+	      push(@{$self->{rels}->{$relation_type}->{'inverse'}->{$super}},$sub);
+	      #      if (! grep(/$super/,@{$self->{rels}->{$relation_type}->{'inverse'}->{$super}}));
+	  };
+	  if ($self->_init_cache) {
+	      $self->{'cache'}->{'rels'} = $self->{'rels'};
+	      $self->_store_cache;
+	  }
+      };
   };
 };
 
@@ -262,13 +330,30 @@ sub parse {
 
 sub frames {
    my $self = shift;
+   
+   if ($self->cache) {
+       $self->_init_cache;
+       if (exists($self->{'cache'}{'all_frames'})) {
+	   return @{$self->{'cache'}{'all_frames'}};
+       }
+   }
+
    $self->parse;
 
    my $frames;
    foreach my $frame ($self->{xtree}->find("//frames/frame")->get_nodelist) {
      $frames->{$frame->find('@name')->string_value} = 1;
    };
-   return (keys %$frames);
+
+   my @all_frames = keys %$frames;
+   
+   if ($self->cache) {
+       $self->_init_cache;
+       $self->{'cache'}{'all_frames'} = \@all_frames;
+       $self->_store_cache;
+   }
+
+   return @all_frames;
  }
 
 
@@ -278,7 +363,7 @@ FrameNet::QueryData - A module for accessing the FrameNet data.
 
 =head1 VERSION
 
-Version 0.01
+Version 0.03
 
 =head1 SYNOPSIS
 
@@ -288,7 +373,8 @@ Version 0.01
     my $framename = "Getting";
 
     my $qd = FrameNet::QueryData->new(-fnhome => $ENV{'FNHOME'},
-                                      -verbose => 0);
+                                      -verbose => 0,
+                                      -cache => 1);
     
     my $frame = $qd->frame($framename);
     # Getting the lexical units
@@ -299,18 +385,37 @@ Version 0.01
     # Listing the names of all lexical units
     print join(', ', map { $_->{'name'} } @$lus);
 
+    # Listing all frames that are used by Getting
+    print $qd->related_frames('Getting', 'Using');
+
+    # List all frames that use Getting
+    print $qd->related_inv_frames('Getting', 'Using');
+
+    # Find out if two frames are directly related
+    print "They are!" if ($qd->related("Getting", "Intentionally_create"));
+
+    # Find out, if two frames are related through a Using relation
+    print "They are!" if ($qd->path_related("Getting", "Intentionally_create", "Using"));
+
+    # Find out if two frames are related through some relations and other frames, i.e. indirectly related
+    print "They are!" if ($qd->transitive_related("Getting", "Intentionally_create"));
+
+    # Printing a list of all frames 
+    print join(', ', $qd->frames);
 
 =head1 DESCRIPTION
 
-The purpose of this module is to provide an easy access to FrameNet. Its database is organized in large XML files, which are parsed by this module. The module is tested with FrameNet 1.2. Other versions may work, but it can not be guaranteed. 
+The purpose of this module is to provide an easy access to FrameNet. Its database is organized in large XML files, which are parsed by this module. The module has been tested with FrameNet 1.2 and 1.3. Other versions may work, but it is not guaranteed. 
 
 =head1 METHODS
 
 =over 4
 
-=item new ( -fnhome, -verbose)
+=item new ( -fnhome, -verbose, -cache)
 
-The constructor for this class. It can take two arguments: The path to the FrameNet directory and a verbosity level. Both are not mandatory. -fnhome defaults to the environment variable $FNHOME, -verbose defaults to 0 (zero), which means no output. 
+The constructor for this class. It can take two arguments: The path to the FrameNet directory and a verbosity level. Both are not mandatory. -fnhome defaults to the environment variable $FNHOME, -verbose defaults to 0 (zero), which means no output.
+
+-cache (available since 0.03) controls, if the parsed data is kept in a file for later use. This increases performance significantly. The cache itself is located in the temporary directory of your system.
 
 =item fnhome ($FNHOME)
 
@@ -362,7 +467,7 @@ With this method, one can check if $FRAME1 and $FRAME2 are related through the g
 
 =item frames ( )
 
-Returns a list of all frames that are defined in FrameNet. 
+Returns a list (NOT a reference to a list) of all frames that are defined in FrameNet. 
 
 =item file_frames_xml ( $PATH ) 
 
@@ -388,13 +493,7 @@ Nils Reiter, C<< <reiter@cpan.org> >>
 
 =head1 BUGS
 
-Please report any bugs or feature requests to
-C<bug-framenet-querydata@rt.cpan.org>, or through the web interface at
-L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=FrameNet-QueryData>.
-I will be notified, and then you'll automatically be notified of progress on
-your bug as I make changes.
-
-=head1 ACKNOWLEDGEMENTS
+Please report any bugs or feature requests to C<reiter@cpan.org>.
 
 =head1 COPYRIGHT & LICENSE
 

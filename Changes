@@ -1,5 +1,10 @@
 Revision history for FrameNet-QueryData
 
+0.03	
+	- Updated documentation
+	- More tests
+	- Caching
+
 0.02 	
 	- Removed Class::MethodMaker dependency
 	- Completed documentation
