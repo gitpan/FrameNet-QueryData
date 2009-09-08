@@ -8,7 +8,8 @@ BEGIN {
 
 use FrameNet::QueryData;
 
-my $qd = FrameNet::QueryData->new();
+my $qd = FrameNet::QueryData->new(-fnhome => 'FrameNet-test', 
+				  -cache => 0);
 
 is(ref $qd, 'FrameNet::QueryData', 'Object loading test');
 
