@@ -2,7 +2,7 @@ package FrameNet::QueryData;
 
 require Exporter;
 our @ISA = qw(Exporter);
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 use Carp;
 use warnings;
