@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                FrameNet-QueryData
-version:             0.05
+version:             0.06
 abstract:            A module for accessing the FrameNet data. 
 license:             ~
 author:              
