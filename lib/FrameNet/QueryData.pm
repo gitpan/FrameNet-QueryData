@@ -2,7 +2,7 @@ package FrameNet::QueryData;
 
 require Exporter;
 our @ISA = qw(Exporter);
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 use Carp;
 use warnings;
@@ -477,6 +477,15 @@ Can be used to get and set the path to the file frames.xml. To get it, just use 
 
 Can be used to get and set the path to the file frrelation.xml. To get, use it without argument. 
 
+=item cache ( $cache )
+
+En- or disables the cache. If $cache is defined, it is enabled. 
+This method is experimental!
+
+=item dumpout ( )
+
+This method prints the entire object using Data::Dumper. Can be used to debug the class.
+
 =item parse ( )
 
 Internal method.
@@ -484,6 +493,8 @@ Internal method.
 =item xparse ( )
 
 Internal method.
+
+
 
 =back
 
